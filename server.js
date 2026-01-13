@@ -1,176 +1,97 @@
-// ===== ENV SETUP =====
-import dotenv from "dotenv";
-dotenv.config();
 
-// ===== IMPORTS =====
 import express from "express";
 import { MongoClient } from "mongodb";
 import cors from "cors";
+import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
-import nodemailer from "nodemailer";
 
-// ===== APP =====
+dotenv.config();
+
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-// ===== ES MODULE __dirname FIX =====
+/* ===== MIDDLEWARE ===== */
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"]
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+/* ===== ES MODULE FIX ===== */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ===== Serve static images =====
+/* ===== STATIC IMAGES ===== */
 app.use("/images", express.static(path.join(__dirname, "images")));
 
-// ===== DB CONFIG =====
+/* ===== DB CONFIG ===== */
 const DB_NAME = "formdata";
-const MONGO_URL =
-  "mongodb+srv://abhishekh:rani181149@firstclauster.9csvrwh.mongodb.net/formdata?retryWrites=true&w=majority";
-
-const client = new MongoClient(MONGO_URL);
+const client = new MongoClient(process.env.MONGO_URL);
 let db;
 
-// ===== EMAIL CONFIG =====
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // NO SPACES
-  },
-});
-
-// 🔍 VERIFY EMAIL CONFIG AT STARTUP
-transporter.verify((err, success) => {
-  if (err) {
-    console.error("❌ Email config error:", err.message);
-  } else {
-    console.log("✅ Email server ready");
-  }
-});
-
-// ===== TEMP OTP STORE =====
-const otpStore = {};
-// otpStore[email] = { otp, name, password, expires }
-
-// ===== START SERVER =====
+/* ===== START SERVER ===== */
 async function startServer() {
   try {
     await client.connect();
     db = client.db(DB_NAME);
-    console.log("✅ MongoDB Atlas Connected");
+    console.log("✅ MongoDB Connected");
 
-    app.listen(5000, () => {
-      console.log("🚀 Server running on port 5000");
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
     });
   } catch (err) {
-    console.error("❌ MongoDB connection error:", err);
+    console.error("❌ MongoDB Error:", err);
   }
 }
 startServer();
 
-// ===== TEST ROUTE =====
+/* ===== TEST ROUTE ===== */
 app.get("/", (req, res) => {
   res.send("Backend is running successfully 🚀");
 });
 
 /* ================= AUTH ================= */
 
-// ===== SEND OTP (NO DB INSERT HERE) =====
+/* ===== SIGNUP ===== */
 app.post("/api/auth/signup", async (req, res) => {
-  if (!db) return res.status(500).json({ message: "DB not connected" });
+  console.log("Signup body:", req.body);
 
   try {
     const { name, email, password } = req.body;
 
-    // Check existing user
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "All fields required" });
+    }
+
     const exists = await db.collection("student").findOne({ email });
     if (exists) {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Store TEMP data
-    otpStore[email] = {
-      otp,
-      name,
-      password,
-      expires: Date.now() + 5 * 60 * 1000, // 5 min
-    };
-
-    console.log("🔐 OTP for", email, ":", otp);
-
-    // Send Email
-    await transporter.sendMail({
-      from: `"Fresher Portal" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Your Signup OTP",
-      html: `
-        <h2>Email Verification</h2>
-        <p>Your OTP is:</p>
-        <h1>${otp}</h1>
-        <p>This OTP is valid for 5 minutes.</p>
-      `,
-    });
-
-    console.log("✅ OTP email sent to", email);
-    res.json({ message: "OTP sent to email" });
-  } catch (err) {
-    console.error("❌ OTP send error:", err.message);
-    res.status(500).json({ message: "Failed to send OTP" });
-  }
-});
-
-// ===== VERIFY OTP (DB INSERT ONLY HERE) =====
-app.post("/api/auth/verify-otp", async (req, res) => {
-  if (!db) return res.status(500).json({ message: "DB not connected" });
-
-  try {
-    const { email, otp } = req.body;
-    const record = otpStore[email];
-
-    if (!record) {
-      return res.status(400).json({ message: "OTP not found" });
-    }
-
-    if (record.expires < Date.now()) {
-      delete otpStore[email];
-      return res.status(400).json({ message: "OTP expired" });
-    }
-
-    if (record.otp !== otp) {
-      return res.status(400).json({ message: "Invalid OTP" });
-    }
-
-    // ✅ INSERT ONLY AFTER OTP VERIFIED
     await db.collection("student").insertOne({
-      name: record.name,
-      email,
-      pass: record.password,
-    });
-
-    delete otpStore[email];
-    console.log("✅ User registered:", email);
-
-    res.status(201).json({ message: "Signup successful" });
-  } catch (err) {
-    console.error("❌ OTP verify error:", err.message);
-    res.status(500).json({ message: "OTP verification failed" });
-  }
-});
-
-// ===== LOGIN =====
-app.post("/api/auth/login", async (req, res) => {
-  if (!db) return res.status(500).json({ message: "DB not connected" });
-
-  try {
-    const { email, password } = req.body;
-
-    const user = await db.collection("student").findOne({
+      name,
       email,
       pass: password,
     });
+
+    res.status(201).json({ message: "Signup successful" });
+  } catch (err) {
+    console.error("Signup error:", err);
+    res.status(500).json({ message: "Signup failed" });
+  }
+});
+
+/* ===== LOGIN ===== */
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await db
+      .collection("student")
+      .findOne({ email, pass: password });
 
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -178,62 +99,87 @@ app.post("/api/auth/login", async (req, res) => {
 
     res.json({
       token: "dummy-token",
-      email: user.email,
       name: user.name,
+      email: user.email,
       enrollmentnum: user.enrollmentnum || null,
       Imgsrc: user.Imgsrc || "/images/fresher.jpg",
     });
-  } catch {
+  } catch (err) {
+    console.error("Login error:", err);
     res.status(500).json({ message: "Login failed" });
   }
 });
 
-/* ===== बाकी ROUTES (UNCHANGED) ===== */
-
+// ===== STUDENTS (VOTE SECTION) =====
 app.get("/students", async (req, res) => {
-  const students = await db.collection("votesection").find().toArray();
-  res.json(students);
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+  try {
+    const students = await db.collection("votesection").find().toArray();
+    res.json(students);
+  } catch {
+    res.status(500).json({ message: "Failed to fetch students" });
+  }
 });
 
+// ===== VOTE =====
 app.post("/vote", async (req, res) => {
-  const { email, enrollmentnum } = req.body;
-  const voted = await db.collection("votes").findOne({ email });
-  if (voted) return res.status(400).json({ message: "Already voted" });
+  if (!db) return res.status(500).json({ message: "DB not connected" });
 
-  await db.collection("votes").insertOne({ email, enrollmentnum });
-  await db.collection("votesection").updateOne(
-    { enrollmentnum },
-    { $inc: { votes: 1 } }
-  );
-  res.json({ message: "Vote successful" });
+  try {
+    const { email, enrollmentnum } = req.body;
+    const voted = await db.collection("votes").findOne({ email });
+    if (voted) return res.status(400).json({ message: "Already voted" });
+
+    await db.collection("votes").insertOne({ email, enrollmentnum });
+    await db.collection("votesection").updateOne(
+      { enrollmentnum },
+      { $inc: { votes: 1 } }
+    );
+    res.json({ message: "Vote successful" });
+  } catch {
+    res.status(500).json({ message: "Vote failed" });
+  }
 });
 
 app.get("/vote/status/:email", async (req, res) => {
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+
   const vote = await db.collection("votes").findOne({ email: req.params.email });
   res.json({ hasVoted: !!vote });
 });
-
-let profecerCache = null;
+let profecerCache = null;   
 
 app.get("/profecers", async (req, res) => {
-  if (profecerCache) return res.json(profecerCache);
+  if (!db) return res.status(500).json({ message: "DB not connected" });
 
-  const profecers = await db
-    .collection("profecerinfo")
-    .find({}, { projection: { name: 1, role: 1, imgsrc: 1 } })
-    .toArray();
+  try {
+    if (profecerCache) {
+      return res.json(profecerCache);  
+    }
 
-  profecerCache = profecers;
-  res.json(profecers);
+    const profecers = await db .collection("profecerinfo") .find({}, { projection: { name: 1, role: 1, imgsrc: 1 } }) .toArray();
+    profecerCache = profecers;
+    res.json(profecers);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch profecers" });
+  }
 });
 
-app.get("/students/top", async (req, res) => {
-  const topStudents = await db
-    .collection("votesection")
-    .find()
-    .sort({ votes: -1 })
-    .limit(1)
-    .toArray();
 
-  res.json(topStudents);
+// ===== TOP 5 MOST VOTED STUDENTS (FROM VOTESECTION) =====
+app.get("/students/top", async (req, res) => {
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+
+  try {
+    const topStudents = await db
+      .collection("votesection")   // ✅ SAME AS VOTESECTION
+      .find()
+      .sort({ votes: -1 })         // highest votes first
+      .limit(1)
+      .toArray();
+
+    res.json(topStudents);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch top students" });
+  }
 });
