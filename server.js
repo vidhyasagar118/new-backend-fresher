@@ -38,6 +38,9 @@ async function startServer() {
   }
 }
 startServer();
+app.get("/", (req, res) => {
+  res.send("Backend is running successfully 🚀");
+});
 
 // ===== AUTH =====
 app.post("/api/auth/signup", async (req, res) => {
