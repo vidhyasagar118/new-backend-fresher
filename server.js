@@ -89,7 +89,7 @@ app.post("/api/auth/signup", async (req, res) => {
 
     await sendOTPEmail(email, otp);
 
-    await db.collection("student").insertOne({
+    await db.collection("otp").insertOne({
       name,
       email,
       phone,
