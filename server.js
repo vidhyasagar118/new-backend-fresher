@@ -6,11 +6,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
+
 dotenv.config();
 
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json()); // ⭐ VERY IMPORTANT
+app.use(express.urlencoded({ extended: true }));
 
 // ===== ES MODULE FIX =====
 const __filename = fileURLToPath(import.meta.url);
@@ -47,13 +49,13 @@ app.get("/", (req, res) => {
 });
 
 // ================= AUTH =================
-
-// ✅ SIGNUP (MATCHING FRONTEND)
 app.post("/api/auth/signup", async (req, res) => {
+  console.log("SIGNUP BODY 👉", req.body); // 👈 ADD THIS
+
   try {
     const { name, email, password } = req.body;
 
-    if (!name || !email  || !password) {
+    if (!name || !email || !password) {
       return res.status(400).json({ message: "All fields required" });
     }
 
@@ -71,10 +73,11 @@ app.post("/api/auth/signup", async (req, res) => {
 
     res.status(201).json({ message: "Signup successful" });
   } catch (err) {
-    console.error("Signup error:", err);
+    console.error(err);
     res.status(500).json({ message: "Signup failed" });
   }
 });
+
 
 // ✅ LOGIN
 app.post("/api/auth/login", async (req, res) => {
