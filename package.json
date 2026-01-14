@@ -1,9 +1,40 @@
 {
+<<<<<<< HEAD
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "mongodb": "^7.0.0",
     "nodemon": "^3.1.11"
+=======
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "��#\u0000 \u0000n\u0000e\u0000w\u0000-\u0000b\u0000a\u0000c\u0000k\u0000e\u0000n\u0000d\u0000-\u0000f\u0000r\u0000e\u0000s\u0000h\u0000e\u0000r\u0000\r\u0000 \u0000",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vidhyasagar118/new-backend-fresher.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/vidhyasagar118/new-backend-fresher/issues"
+  },
+  "homepage": "https://github.com/vidhyasagar118/new-backend-fresher#readme",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.22.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.0.0",
+    "nodemailer": "^7.0.12"
+>>>>>>> d5c32726d69587d25d707fc5c5d6bb3c732c543f
   }
 }
