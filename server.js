@@ -6,6 +6,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
+import sgMail from "@sendgrid/mail";
+import { v4 as uuid } from "uuid";
 
 dotenv.config();
 
@@ -13,6 +15,9 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json()); // ⭐ VERY IMPORTANT
 app.use(express.urlencoded({ extended: true }));
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+const otpCollection = () => db.collection("otp_requests");
 
 // ===== ES MODULE FIX =====
 const __filename = fileURLToPath(import.meta.url);
@@ -78,7 +83,53 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
+app.post("/api/auth/send-otp", async (req, res) => {
+  const { name, email, password } = req.body;
 
+  if (!name || !email || !password)
+    return res.status(400).json({ message: "All fields required" });
+
+  const exists = await db.collection("student").findOne({ email });
+  if (exists) return res.status(400).json({ message: "User already exists" });
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  await otpCollection().deleteMany({ email });
+
+  await otpCollection().insertOne({
+    email,
+    name,
+    password,
+    otp,
+    createdAt: new Date(),
+  });
+
+  await sgMail.send({
+    to: email,
+    from: "YOUR_VERIFIED_EMAIL",
+    subject: "Your Signup OTP",
+    text: `Your OTP is ${otp}`,
+  });
+
+  res.json({ message: "OTP sent" });
+});
+app.post("/api/auth/verify-otp", async (req, res) => {
+  const { email, otp } = req.body;
+
+  const record = await otpCollection().findOne({ email, otp });
+  if (!record) return res.status(400).json({ message: "Invalid OTP" });
+
+  await db.collection("student").insertOne({
+    name: record.name,
+    email: record.email,
+    pass: record.password,
+    Imgsrc: "/images/fresher.jpg",
+  });
+
+  await otpCollection().deleteOne({ email });
+
+  res.json({ message: "Signup complete" });
+});
 // ✅ LOGIN
 app.post("/api/auth/login", async (req, res) => {
   try {
