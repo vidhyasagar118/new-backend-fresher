@@ -5,6 +5,7 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import nodemailer from "nodemailer";
 
 
 dotenv.config();
@@ -48,36 +49,73 @@ app.get("/", (req, res) => {
   res.send("Backend is running successfully 🚀");
 });
 
-// ================= AUTH =================
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 app.post("/api/auth/signup", async (req, res) => {
-  console.log("SIGNUP BODY 👉", req.body); // 👈 ADD THIS
-
   try {
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password)
       return res.status(400).json({ message: "All fields required" });
-    }
 
     const exists = await db.collection("student").findOne({ email });
-    if (exists) {
-      return res.status(400).json({ message: "User already exists" });
-    }
+    if (exists) return res.status(400).json({ message: "User already exists" });
 
-    await db.collection("student").insertOne({
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await db.collection("otpverify").deleteMany({ email });
+
+    await db.collection("otpverify").insertOne({
       name,
       email,
-      pass: password,
+      password,
+      otp,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 min
+    });
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Your OTP Verification Code",
+      html: `<h2>Your OTP: ${otp}</h2><p>Valid for 5 minutes</p>`,
+    });
+
+    res.status(200).json({ message: "OTP sent to email" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "OTP send failed" });
+  }
+});
+app.post("/api/auth/verify-otp", async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    const record = await db.collection("otpverify").findOne({ email, otp });
+
+    if (!record) return res.status(400).json({ message: "Invalid OTP" });
+
+    if (record.expiresAt < new Date())
+      return res.status(400).json({ message: "OTP expired" });
+
+    await db.collection("student").insertOne({
+      name: record.name,
+      email: record.email,
+      pass: record.password,
       Imgsrc: "/images/fresher.jpg",
     });
 
-    res.status(201).json({ message: "Signup successful" });
+    await db.collection("otpverify").deleteOne({ email });
+
+    res.json({ message: "Signup successful" });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Signup failed" });
+    res.status(500).json({ message: "OTP verification failed" });
   }
 });
-
 
 // ✅ LOGIN
 app.post("/api/auth/login", async (req, res) => {
