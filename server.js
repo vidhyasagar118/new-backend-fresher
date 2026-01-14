@@ -1,202 +1,155 @@
 // server.js
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
-require("dotenv").config();
+import express from "express";
+import { MongoClient } from "mongodb";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ------------------ Models ------------------
-const userSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  phone: { type: String, unique: true },
-  password: String,
-  otp: String,
-  otpExpire: Date,
-  isVerified: { type: Boolean, default: false },
-});
-const User = mongoose.model("User", userSchema);
+// ===== ES MODULE __dirname FIX =====
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const studentSchema = new mongoose.Schema({
-  name: String,
-  enrollmentnum: { type: String, unique: true },
-  Imgsrc: String,
-  votes: { type: Number, default: 0 },
-});
-const Student = mongoose.model("Student", studentSchema);
+// ===== Serve static images =====
+app.use("/images", express.static(path.join(__dirname, "images")));
 
-const voteSchema = new mongoose.Schema({
-  email: String,
-  enrollmentnum: String,
-});
-const Vote = mongoose.model("Vote", voteSchema);
+// ===== DB CONFIG =====
+const DB_NAME = "formdata";
+const url =
+  "mongodb+srv://abhishekh:rani181149@firstclauster.9csvrwh.mongodb.net/formdata?retryWrites=true&w=majority";
 
-const profSchema = new mongoose.Schema({
-  name: String,
-  role: String,
-  imgsrc: String,
-});
-const Professor = mongoose.model("Professor", profSchema);
+const client = new MongoClient(url);
+let db;
 
-// ------------------ Utilities ------------------
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER, // e.g., kushwahaabhishekh118@gmail.com
-    pass: process.env.EMAIL_PASS, // app password
-  },
-});
-
-const sendOTPEmail = async (to, otp) => {
+async function startServer() {
   try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to,
-      subject: "Your OTP for Signup",
-      text: `Your OTP is: ${otp}. It expires in 10 minutes.`,
+    await client.connect();
+    db = client.db(DB_NAME);
+    console.log("✅ MongoDB Atlas Connected");
+
+    app.listen(5000, () => {
+      console.log("🚀 Server running on port 5000");
     });
-    console.log(`OTP sent to ${to}`);
   } catch (err) {
-    console.log("Error sending OTP:", err);
+    console.error("❌ MongoDB connection error:", err);
   }
-};
+}
+startServer();
+app.get("/", (req, res) => {
+  res.send("Backend is running successfully 🚀");
+});
 
-// ------------------ Auth Routes ------------------
-
-// Signup
+// ===== AUTH =====
 app.post("/api/auth/signup", async (req, res) => {
-  const { name, email, phone, password } = req.body;
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+
   try {
-    if (await User.findOne({ email })) return res.status(400).json({ message: "Email exists" });
-    if (await User.findOne({ phone })) return res.status(400).json({ message: "Phone exists" });
+    const { name, email, password } = req.body;
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const otp = generateOTP();
-    const otpExpire = new Date(Date.now() + 10 * 60 * 1000);
+    const exists = await db.collection("student").findOne({ email });
+    if (exists) return res.status(400).json({ message: "User already exists" });
 
-    const newUser = new User({ name, email, phone, password: hashedPassword, otp, otpExpire });
-    await newUser.save();
-
-    await sendOTPEmail(email, otp);
-    res.status(201).json({ message: "Signup successful. OTP sent." });
+    await db.collection("student").insertOne({ name, email, pass: password });
+    res.status(201).json({ message: "Signup successful" });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Signup failed" });
   }
 });
 
-// Verify OTP
-app.post("/api/auth/verify-otp", async (req, res) => {
-  const { email, otp } = req.body;
-  try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "User not found" });
-    if (user.otp !== otp) return res.status(400).json({ message: "Invalid OTP" });
-    if (user.otpExpire < new Date()) return res.status(400).json({ message: "OTP expired" });
-
-    user.isVerified = true;
-    user.otp = null;
-    user.otpExpire = null;
-    await user.save();
-
-    res.json({ message: "User verified successfully" });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-// Login
 app.post("/api/auth/login", async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "User not found" });
-    if (!await bcrypt.compare(password, user.password)) return res.status(400).json({ message: "Invalid credentials" });
-    if (!user.isVerified) return res.status(400).json({ message: "Verify OTP first" });
+  if (!db) return res.status(500).json({ message: "DB not connected" });
 
-    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: "1d" });
-    res.json({ message: "Login successful", token, user });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "Server error" });
+  try {
+    const { email, password } = req.body;
+    const user = await db.collection("student").findOne({ email, pass: password });
+
+    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+
+    res.json({
+      token: "dummy-token",
+      email: user.email,
+      name: user.name,
+      enrollmentnum: user.enrollmentnum || null,
+      Imgsrc: user.Imgsrc || "/images/fresher.jpg", // fallback image
+    });
+  } catch {
+    res.status(500).json({ message: "Login failed" });
   }
 });
 
-// ------------------ Voting Routes ------------------
-
-// Get all students
+// ===== STUDENTS (VOTE SECTION) =====
 app.get("/students", async (req, res) => {
+  if (!db) return res.status(500).json({ message: "DB not connected" });
   try {
-    const students = await Student.find();
+    const students = await db.collection("votesection").find().toArray();
     res.json(students);
   } catch {
     res.status(500).json({ message: "Failed to fetch students" });
   }
 });
 
-// Vote
+// ===== VOTE =====
 app.post("/vote", async (req, res) => {
-  const { email, enrollmentnum } = req.body;
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+
   try {
-    const user = await User.findOne({ email });
-    if (!user || !user.isVerified) return res.status(400).json({ message: "User not verified" });
+    const { email, enrollmentnum } = req.body;
+    const voted = await db.collection("votes").findOne({ email });
+    if (voted) return res.status(400).json({ message: "Already voted" });
 
-    if (await Vote.findOne({ email })) return res.status(400).json({ message: "Already voted" });
-
-    const student = await Student.findOne({ enrollmentnum });
-    if (!student) return res.status(404).json({ message: "Student not found" });
-
-    student.votes += 1;
-    await student.save();
-
-    const vote = new Vote({ email, enrollmentnum });
-    await vote.save();
-
+    await db.collection("votes").insertOne({ email, enrollmentnum });
+    await db.collection("votesection").updateOne(
+      { enrollmentnum },
+      { $inc: { votes: 1 } }
+    );
     res.json({ message: "Vote successful" });
   } catch {
     res.status(500).json({ message: "Vote failed" });
   }
 });
 
-// Check vote status
 app.get("/vote/status/:email", async (req, res) => {
-  const vote = await Vote.findOne({ email: req.params.email });
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+
+  const vote = await db.collection("votes").findOne({ email: req.params.email });
   res.json({ hasVoted: !!vote });
 });
+let profecerCache = null;   
 
-// ------------------ Professors ------------------
 app.get("/profecers", async (req, res) => {
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+
   try {
-    const profecers = await Professor.find({}, { name: 1, role: 1, imgsrc: 1 });
+    if (profecerCache) {
+      return res.json(profecerCache);  
+    }
+
+    const profecers = await db .collection("profecerinfo") .find({}, { projection: { name: 1, role: 1, imgsrc: 1 } }) .toArray();
+    profecerCache = profecers;
     res.json(profecers);
-  } catch {
-    res.status(500).json({ message: "Failed to fetch professors" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch profecers" });
   }
 });
 
-// ------------------ Top 5 Students ------------------
+
+// ===== TOP 5 MOST VOTED STUDENTS (FROM VOTESECTION) =====
 app.get("/students/top", async (req, res) => {
+  if (!db) return res.status(500).json({ message: "DB not connected" });
+
   try {
-    const topStudents = await Student.find().sort({ votes: -1 }).limit(5);
+    const topStudents = await db
+      .collection("votesection")   // ✅ SAME AS VOTESECTION
+      .find()
+      .sort({ votes: -1 })         // highest votes first
+      .limit(1)
+      .toArray();
+
     res.json(topStudents);
-  } catch {
+  } catch (err) {
     res.status(500).json({ message: "Failed to fetch top students" });
   }
 });
-
-// ------------------ Connect & Start ------------------
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.log(err));
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
