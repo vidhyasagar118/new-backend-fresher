@@ -51,9 +51,9 @@ app.get("/", (req, res) => {
 // ✅ SIGNUP (MATCHING FRONTEND)
 app.post("/api/auth/signup", async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
+    const { name, email, password } = req.body;
 
-    if (!name || !email || !phone || !password) {
+    if (!name || !email  || !password) {
       return res.status(400).json({ message: "All fields required" });
     }
 
@@ -65,7 +65,6 @@ app.post("/api/auth/signup", async (req, res) => {
     await db.collection("student").insertOne({
       name,
       email,
-      phone,
       pass: password,
       Imgsrc: "/images/fresher.jpg",
     });
