@@ -18,33 +18,26 @@ app.use(express.json());
 // ===== ES MODULE FIX =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// ===== STATIC IMAGES =====
 app.use("/images", express.static(path.join(__dirname, "images")));
 
 // ===================================================
-// =============== DB CONNECTIONS =====================
+// ================= DATABASE CONNECT =================
 // ===================================================
 
 async function connectDatabases() {
   try {
-    // ✅ DB1 — Mongoose (schoolweb)
+    // ✅ AUTH DB
     await mongoose.connect(process.env.MONGO_URI_AUTH);
     console.log("✅ Auth DB connected (schoolweb)");
 
-    // ✅ DB2 — MongoClient (formdata)
+    // ✅ FORM DB
     const client = new MongoClient(process.env.MONGO_URI_FORM);
     await client.connect();
-    const formDB = client.db("formdata");
+    app.locals.formDB = client.db("formdata");
     console.log("✅ Form DB connected (formdata)");
 
-    // start server AFTER DB connected
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
-
-    // expose db globally
-    app.locals.formDB = formDB;
-
   } catch (err) {
     console.error("❌ Database connection failed:", err);
     process.exit(1);
@@ -60,7 +53,7 @@ connectDatabases();
 const userSchema = new mongoose.Schema({
   name: String,
   email: { type: String, unique: true },
-  phone: { type: String, unique: true },
+  phone: String,
   password: String,
   otp: String,
   otpExpire: Date,
@@ -80,6 +73,21 @@ const contactSchema = new mongoose.Schema({
 const Contact = mongoose.model("Contact", contactSchema);
 
 // ===================================================
+// ================= OTP + EMAIL =====================
+// ===================================================
+
+const generateOTP = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// ===================================================
 // ================= CONTACT ROUTE ===================
 // ===================================================
 
@@ -89,15 +97,15 @@ app.post("/api/contact", async (req, res) => {
     await contact.save();
     res.status(201).json({ message: "Message sent successfully" });
   } catch (err) {
-    console.log(err);
     res.status(500).json({ message: "Contact failed" });
   }
 });
 
 // ===================================================
-// ================= AUTH ROUTES ======================
+// ================= AUTH ROUTES =====================
 // ===================================================
 
+// ✅ SIGNUP WITH OTP
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
@@ -111,21 +119,60 @@ app.post("/api/auth/signup", async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 10);
 
+    const otp = generateOTP();
+    const otpExpire = new Date(Date.now() + 10 * 60 * 1000);
+
     await User.create({
       name,
       email,
       phone,
       password: hashed,
-      isVerified: true, // OTP skip for now
+      otp,
+      otpExpire,
+      isVerified: false,
     });
 
-    res.status(201).json({ message: "Signup successful" });
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "OTP Verification",
+      text: `Your OTP is ${otp}. Valid for 10 minutes.`,
+    });
+
+    res.status(201).json({ message: "OTP sent to email" });
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: "Signup failed" });
   }
 });
 
+// ✅ VERIFY OTP
+app.post("/api/auth/verify-otp", async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user)
+      return res.status(400).json({ message: "User not found" });
+
+    if (user.otp !== otp)
+      return res.status(400).json({ message: "Invalid OTP" });
+
+    if (user.otpExpire < new Date())
+      return res.status(400).json({ message: "OTP expired" });
+
+    user.isVerified = true;
+    user.otp = null;
+    user.otpExpire = null;
+    await user.save();
+
+    res.json({ message: "Account verified successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "OTP verify failed" });
+  }
+});
+
+// ✅ LOGIN
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -133,6 +180,9 @@ app.post("/api/auth/login", async (req, res) => {
     const user = await User.findOne({ email });
     if (!user)
       return res.status(400).json({ message: "User not found" });
+
+    if (!user.isVerified)
+      return res.status(400).json({ message: "Verify OTP first" });
 
     const match = await bcrypt.compare(password, user.password);
     if (!match)
@@ -146,7 +196,6 @@ app.post("/api/auth/login", async (req, res) => {
 
     res.json({ token, user });
   } catch (err) {
-    console.log(err);
     res.status(500).json({ message: "Login failed" });
   }
 });
@@ -182,27 +231,5 @@ app.post("/vote", async (req, res) => {
     res.json({ message: "Vote successful" });
   } catch {
     res.status(500).json({ message: "Vote failed" });
-  }
-});
-
-app.get("/vote/status/:email", async (req, res) => {
-  const db = app.locals.formDB;
-  const vote = await db.collection("votes").findOne({ email: req.params.email });
-  res.json({ hasVoted: !!vote });
-});
-
-app.get("/students/top", async (req, res) => {
-  try {
-    const db = app.locals.formDB;
-    const topStudents = await db
-      .collection("votesection")
-      .find()
-      .sort({ votes: -1 })
-      .limit(5)
-      .toArray();
-
-    res.json(topStudents);
-  } catch {
-    res.status(500).json({ message: "Failed to fetch top students" });
   }
 });
