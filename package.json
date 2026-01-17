@@ -1,7 +1,7 @@
 {
   "name": "backend-fresher",
   "version": "1.0.0",
-  "type": "module",
+  "type": "commonjs",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,11 +12,14 @@
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
-    "express": "^4.21.2",
+    "express": "^4.22.1",
+    "express-session": "^1.18.2",
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^6.21.0",
     "mongoose": "^9.1.4",
     "nodemailer": "^7.0.12",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
     "uuid": "^13.0.0"
   }
 }
