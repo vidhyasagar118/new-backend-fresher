@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import { MongoClient } from "mongodb";
 import cors from "cors";
