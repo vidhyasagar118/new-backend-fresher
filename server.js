@@ -1,17 +1,16 @@
-// server.js
 import express from "express";
 import { MongoClient } from "mongodb";
 import cors from "cors";
+import dotenv from "dotenv";
+import nodemailer from "nodemailer";
 import path from "path";
 import { fileURLToPath } from "url";
-import dotenv from "dotenv";
-
 
 dotenv.config();
-
 const app = express();
+
 app.use(cors({ origin: "*" }));
-app.use(express.json()); // ⭐ VERY IMPORTANT
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ===== ES MODULE FIX =====
@@ -21,90 +20,111 @@ const __dirname = path.dirname(__filename);
 // ===== STATIC IMAGES =====
 app.use("/images", express.static(path.join(__dirname, "images")));
 
-// ===== DB CONFIG =====
-const DB_NAME = "formdata";
+// ===== DB =====
 const client = new MongoClient(process.env.MONGO_URL);
 let db;
 
-// ===== START SERVER =====
-async function startServer() {
-  try {
-    await client.connect();
-    db = client.db(DB_NAME);
-    console.log("✅ MongoDB Connected");
+// ===== OTP STORE =====
+const otpStore = new Map(); // email -> otp
 
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
-  } catch (err) {
-    console.error("❌ MongoDB Error:", err);
-  }
-}
-startServer();
-
-// ===== TEST =====
-app.get("/", (req, res) => {
-  res.send("Backend is running successfully 🚀");
+// ===== EMAIL =====
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
-// ================= AUTH =================
-app.post("/api/auth/signup", async (req, res) => {
-  console.log("SIGNUP BODY 👉", req.body); // 👈 ADD THIS
+// ===== START =====
+async function start() {
+  try {
+    await client.connect();
+    db = client.db("formdata");
+    console.log("✅ Mongo Connected");
+
+    app.listen(process.env.PORT || 5000, () =>
+      console.log("🚀 Server running")
+    );
+  } catch (err) {
+    console.error("❌ DB Error:", err);
+  }
+}
+start();
+
+// ================= TEST =================
+app.get("/", (req, res) => res.send("Backend Running 🚀"));
+
+// ================= SEND OTP =================
+app.post("/api/auth/send-otp", async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) return res.status(400).json({ message: "Email required" });
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  otpStore.set(email, otp);
 
   try {
-    const { name, email, password } = req.body;
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Your Signup OTP",
+      html: `<h2>Your OTP is: ${otp}</h2>`,
+    });
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "All fields required" });
-    }
+    res.json({ message: "OTP sent" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "OTP send failed" });
+  }
+});
 
-    const exists = await db.collection("student").findOne({ email });
-    if (exists) {
-      return res.status(400).json({ message: "User already exists" });
-    }
+// ================= VERIFY + SIGNUP =================
+app.post("/api/auth/verify-signup", async (req, res) => {
+  try {
+    const { name, email, password, enrollmentnum, otp } = req.body;
 
-    await db.collection("student").insertOne({
+    const savedOtp = otpStore.get(email);
+    if (!savedOtp || savedOtp !== otp)
+      return res.status(400).json({ message: "Invalid OTP" });
+
+    const exists = await db.collection("freshersignupdata").findOne({ email });
+    if (exists) return res.status(400).json({ message: "User exists" });
+
+    await db.collection("freshersignupdata").insertOne({
       name,
       email,
       pass: password,
+      enrollmentnum,
       Imgsrc: "/images/fresher.jpg",
     });
 
-    res.status(201).json({ message: "Signup successful" });
+    otpStore.delete(email);
+    res.status(201).json({ message: "Signup success" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Signup failed" });
   }
 });
 
-
-// ✅ LOGIN
+// ================= LOGIN =================
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "All fields required" });
-    }
-
     const user = await db
-      .collection("student")
+      .collection("freshersignupdata")
       .findOne({ email, pass: password });
 
-    if (!user) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
+    if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
     res.json({
-      token: "dummy-token",
       name: user.name,
       email: user.email,
-      phone: user.phone,
-      Imgsrc: user.Imgsrc || "/images/fresher.jpg",
+      enrollmentnum: user.enrollmentnum,
+      Imgsrc: user.Imgsrc,
     });
   } catch (err) {
-    console.error("Login error:", err);
     res.status(500).json({ message: "Login failed" });
   }
 });
