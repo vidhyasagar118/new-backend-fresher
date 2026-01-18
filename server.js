@@ -9,34 +9,34 @@ import { fileURLToPath } from "url";
 dotenv.config();
 
 const app = express();
-app.use(cors({ origin: "*" }));
+app.use(cors({
+  origin: ["https://freshers1.vercel.app"],
+  methods: ["GET", "POST"],
+  credentials: false,
+}));
+app.options("*", cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ===== PATH FIX =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ===== STATIC IMAGES =====
 app.use("/images", express.static(path.join(__dirname, "images")));
 
-// ===== MONGO =====
 const client = new MongoClient(process.env.MONGO_URL);
 let db;
 
-// ===== OTP STORE =====
 const otpStore = new Map();
 
-// ===== NODEMAILER =====
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // 🔥 MUST BE APP PASSWORD
+    pass: process.env.EMAIL_PASS, 
   },
 });
 
-// ===== CONNECT DB =====
 async function start() {
   try {
     await client.connect();
@@ -52,14 +52,9 @@ async function start() {
 }
 start();
 
-// ===== TEST ROUTE =====
 app.get("/", (req, res) => res.send("Backend Running 🚀"));
 
-/* =====================================================
-   AUTH ROUTES
-===================================================== */
 
-// ===== SEND OTP =====
 app.post("/api/auth/send-otp", async (req, res) => {
   try {
     const { email } = req.body;
