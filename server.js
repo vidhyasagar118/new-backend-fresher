@@ -1,153 +1,128 @@
+
+// server.js
 import express from "express";
 import { MongoClient } from "mongodb";
 import cors from "cors";
-import dotenv from "dotenv";
-import nodemailer from "nodemailer";
 import path from "path";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+
 
 dotenv.config();
 
 const app = express();
-app.use(cors({
-  origin: ["https://freshers1.vercel.app"],
-  methods: ["GET", "POST"],
-  credentials: false,
-}));
-app.options("*", cors());
-
-app.use(express.json());
+app.use(cors({ origin: "*" }));
+app.use(express.json()); // ⭐ VERY IMPORTANT
 app.use(express.urlencoded({ extended: true }));
 
+// ===== ES MODULE FIX =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ===== STATIC IMAGES =====
 app.use("/images", express.static(path.join(__dirname, "images")));
 
+// ===== DB CONFIG =====
+const DB_NAME = "formdata";
 const client = new MongoClient(process.env.MONGO_URL);
 let db;
 
-const otpStore = new Map();
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, 
-  },
-});
-
-async function start() {
+// ===== START SERVER =====
+async function startServer() {
   try {
     await client.connect();
-    db = client.db("formdata");
+    db = client.db(DB_NAME);
     console.log("✅ MongoDB Connected");
 
-    app.listen(process.env.PORT || 5000, () =>
-      console.log("🚀 Server Running on Port", process.env.PORT || 5000)
-    );
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
   } catch (err) {
-    console.error("❌ DB Connection Error:", err);
+    console.error("❌ MongoDB Error:", err);
   }
 }
-start();
+startServer();
 
-app.get("/", (req, res) => res.send("Backend Running 🚀"));
-
-
-app.post("/api/auth/send-otp", async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ message: "Email required" });
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    otpStore.set(email, otp);
-
-    console.log("OTP:", otp, "Email:", email);
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Your Signup OTP",
-      html: `<h2>Your OTP is: ${otp}</h2>`,
-    });
-
-    res.json({ message: "OTP sent successfully" });
-  } catch (err) {
-    console.error("❌ OTP Email Error:", err);
-    res.status(500).json({ message: "OTP send failed" });
-  }
+// ===== TEST =====
+app.get("/", (req, res) => {
+  res.send("Backend is running successfully 🚀");
 });
 
-// ===== VERIFY OTP + SIGNUP =====
-app.post("/api/auth/verify-signup", async (req, res) => {
+// ================= AUTH =================
+app.post("/api/auth/signup", async (req, res) => {
+  console.log("SIGNUP BODY 👉", req.body); // 👈 ADD THIS
+
   try {
-    const { name, email, password, enrollmentnum, otp } = req.body;
+    const { name, email, password } = req.body;
 
-    if (!otpStore.has(email))
-      return res.status(400).json({ message: "OTP expired" });
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "All fields required" });
+    }
 
-    if (otpStore.get(email) !== otp)
-      return res.status(400).json({ message: "Invalid OTP" });
+    const exists = await db.collection("student").findOne({ email });
+    if (exists) {
+      return res.status(400).json({ message: "User already exists" });
+    }
 
-    const exists = await db.collection("freshersignupdata").findOne({ email });
-    if (exists) return res.status(400).json({ message: "User already exists" });
-
-    await db.collection("freshersignupdata").insertOne({
+    await db.collection("student").insertOne({
       name,
       email,
       pass: password,
-      enrollmentnum,
       Imgsrc: "/images/fresher.jpg",
     });
 
-    otpStore.delete(email);
     res.status(201).json({ message: "Signup successful" });
   } catch (err) {
-    console.error("❌ Signup Error:", err);
+    console.error(err);
     res.status(500).json({ message: "Signup failed" });
   }
 });
 
-// ===== LOGIN =====
+
+// ✅ LOGIN
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return res.status(400).json({ message: "All fields required" });
+    }
+
     const user = await db
-      .collection("freshersignupdata")
+      .collection("student")
       .findOne({ email, pass: password });
 
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
 
     res.json({
+      token: "dummy-token",
       name: user.name,
       email: user.email,
-      enrollmentnum: user.enrollmentnum,
-      Imgsrc: user.Imgsrc,
+      phone: user.phone,
+      Imgsrc: user.Imgsrc || "/images/fresher.jpg",
     });
   } catch (err) {
-    console.error("❌ Login Error:", err);
+    console.error("Login error:", err);
     res.status(500).json({ message: "Login failed" });
   }
 });
 
-/* =====================================================
-   STUDENTS + VOTING
-===================================================== */
+// ================= STUDENTS =================
 
-// ===== ALL STUDENTS =====
 app.get("/students", async (req, res) => {
   try {
     const students = await db.collection("votesection").find().toArray();
     res.json(students);
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Failed to fetch students" });
   }
 });
 
-// ===== VOTE =====
+// ================= VOTE =================
+
 app.post("/vote", async (req, res) => {
   try {
     const { email, enrollmentnum } = req.body;
@@ -156,30 +131,44 @@ app.post("/vote", async (req, res) => {
     if (voted) return res.status(400).json({ message: "Already voted" });
 
     await db.collection("votes").insertOne({ email, enrollmentnum });
-
     await db.collection("votesection").updateOne(
       { enrollmentnum },
       { $inc: { votes: 1 } }
     );
 
     res.json({ message: "Vote successful" });
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.status(500).json({ message: "Vote failed" });
   }
 });
 
-// ===== CHECK VOTE =====
 app.get("/vote/status/:email", async (req, res) => {
+  const vote = await db.collection("votes").findOne({ email: req.params.email });
+  res.json({ hasVoted: !!vote });
+});
+
+// ================= PROFECERS =================
+
+let profecerCache = null;
+
+app.get("/profecers", async (req, res) => {
   try {
-    const vote = await db.collection("votes").findOne({ email: req.params.email });
-    res.json({ hasVoted: !!vote });
+    if (profecerCache) return res.json(profecerCache);
+
+    const profecers = await db
+      .collection("profecerinfo")
+      .find({}, { projection: { name: 1, role: 1, imgsrc: 1 } })
+      .toArray();
+
+    profecerCache = profecers;
+    res.json(profecers);
   } catch {
-    res.status(500).json({ hasVoted: false });
+    res.status(500).json({ message: "Failed to fetch profecers" });
   }
 });
 
-// ===== TOP STUDENTS =====
+// ================= TOP STUDENTS =================
+
 app.get("/students/top", async (req, res) => {
   try {
     const topStudents = await db
@@ -192,27 +181,5 @@ app.get("/students/top", async (req, res) => {
     res.json(topStudents);
   } catch {
     res.status(500).json({ message: "Failed to fetch top students" });
-  }
-});
-
-/* =====================================================
-   PROFECERS
-===================================================== */
-
-let profecerCache = null;
-
-app.get("/profecers", async (req, res) => {
-  try {
-    if (profecerCache) return res.json(profecerCache);
-
-    const profecers = await db
-      .collection("profecerinfo")
-      .find({}, { projection: { name: 1, role: 1 } })
-      .toArray();
-
-    profecerCache = profecers;
-    res.json(profecers);
-  } catch {
-    res.status(500).json({ message: "Failed to fetch profecers" });
   }
 });
